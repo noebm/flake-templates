@@ -3,9 +3,9 @@
 
   outputs = {self}: {
     templates = {
-      rust-bevy = {
+      bevy = {
         description = "A bevy template, using crane";
-        path = ./rust/bevy;
+        path = ./bevy;
       };
     };
   };

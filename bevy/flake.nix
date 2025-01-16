@@ -4,7 +4,11 @@
     flake-utils.url = "github:numtide/flake-utils";
 
     crane.url = "github:ipetkov/crane";
-    crane.inputs.nixpkgs.follows = "nixpkgs";
+
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = {
@@ -12,15 +16,23 @@
     nixpkgs,
     flake-utils,
     crane,
+    rust-overlay,
+    ...
   }:
     flake-utils.lib.eachDefaultSystem (system: let
-      pkgs = nixpkgs.legacyPackages.${system};
-      crane-lib = crane.lib.${system};
+      pkgs = import nixpkgs {
+        inherit system;
+        overlays = [(import rust-overlay)];
+      };
+      crane-lib = (crane.mkLib pkgs).overrideToolchain (
+        p:
+          p.rust-bin.stable.latest.default
+      );
 
       nativeBuildInputsCommon = with pkgs; [pkg-config];
       buildInputsCommon = with pkgs; [
         udev
-        alsaLib
+        alsa-lib
         vulkan-loader
         # To use the x11 feature
         xorg.libX11
@@ -43,11 +55,27 @@
       };
       cargoArtifacts = crane-lib.buildDepsOnly commonArgs;
 
+      assets = let
+        fs = pkgs.lib.fileset;
+        assetFiles = fs.gitTracked ./assets;
+      in
+        pkgs.stdenv.mkDerivation {
+          name = "assets";
+          src = fs.toSource {
+            root = ./.;
+            fileset = assetFiles;
+          };
+          installPhase = ''
+            cp -vr . $out
+          '';
+        };
+
       crate = crane-lib.buildPackage ({
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath commonArgs.buildInputs;
+          BEVY_ASSET_ROOT = assets;
 
           postInstall = ''
-            wrapProgram "$out/bin/$pname" --set LD_LIBRARY_PATH $LD_LIBRARY_PATH
+            wrapProgram "$out/bin/$pname" --set LD_LIBRARY_PATH $LD_LIBRARY_PATH --set BEVY_ASSET_ROOT $BEVY_ASSET_ROOT
           '';
         }
         // commonArgs
@@ -59,6 +87,7 @@
       };
 
       packages.default = crate;
+      packages.assets = assets;
 
       apps.default = flake-utils.lib.mkApp {
         drv = crate;
